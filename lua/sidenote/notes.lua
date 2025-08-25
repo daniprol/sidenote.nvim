@@ -5,6 +5,13 @@ local paths = require('sidenote.paths')
 
 local M = {}
 
+-- UI manager for dependency injection
+local ui_manager = nil
+
+function M.set_ui_manager(manager)
+  ui_manager = manager
+end
+
 ---
 -- Gets the visual selection range and text.
 -- @return integer, integer, string[]|nil
@@ -88,12 +95,17 @@ function M.create_note()
     local all_notes = M.parse_notes_for_buffer(bufnr) or {}
     table.insert(all_notes, new_note)
 
-    local dir = vim.fn.fnamemodify(note_filepath, ':h')
-    vim.fn.mkdir(dir, 'p')
+     local dir = vim.fn.fnamemodify(note_filepath, ':h')
+     vim.fn.mkdir(dir, 'p')
 
-    vim.fn.writefile({ 'return ' .. vim.inspect(all_notes) }, note_filepath)
-    vim.notify('Sidenote: Note saved successfully!')
-    require('sidenote.lsp').update_diagnostics(bufnr)
+     vim.fn.writefile({ 'return ' .. vim.inspect(all_notes) }, note_filepath)
+     vim.notify('Sidenote: Note saved successfully!')
+
+     -- Update UI display
+     if ui_manager then
+       local located_notes = M.find_all_notes_in_buffer(bufnr)
+       ui_manager:update(bufnr, located_notes)
+     end
   end)
 end
 
@@ -155,11 +167,16 @@ function M.delete_note_at_cursor()
     end
   end
 
-  local note_filepath = paths.get_note_filepath(bufnr)
-  vim.fn.writefile({ 'return ' .. vim.inspect(updated_notes) }, note_filepath)
+   local note_filepath = paths.get_note_filepath(bufnr)
+   vim.fn.writefile({ 'return ' .. vim.inspect(updated_notes) }, note_filepath)
 
-  vim.notify('Sidenote: Note deleted successfully.')
-  require('sidenote.lsp').update_diagnostics(bufnr)
+   vim.notify('Sidenote: Note deleted successfully.')
+
+   -- Update UI display
+   if ui_manager then
+     local located_notes = M.find_all_notes_in_buffer(bufnr)
+     ui_manager:update(bufnr, located_notes)
+   end
 end
 
 ---
@@ -212,11 +229,16 @@ function M.edit_note_at_cursor()
       end
     end
 
-    local note_filepath = paths.get_note_filepath(bufnr)
-    vim.fn.writefile({ 'return ' .. vim.inspect(all_notes_raw) }, note_filepath)
+     local note_filepath = paths.get_note_filepath(bufnr)
+     vim.fn.writefile({ 'return ' .. vim.inspect(all_notes_raw) }, note_filepath)
 
-    vim.notify('Sidenote: Note updated successfully.')
-    require('sidenote.lsp').update_diagnostics(bufnr)
+     vim.notify('Sidenote: Note updated successfully.')
+
+     -- Update UI display
+     if ui_manager then
+       local located_notes = M.find_all_notes_in_buffer(bufnr)
+       ui_manager:update(bufnr, located_notes)
+     end
   end)
 end
 
@@ -227,13 +249,17 @@ function M.delete_all_notes_for_buffer()
   local bufnr = vim.api.nvim_get_current_buf()
   local note_filepath = paths.get_note_filepath(bufnr)
 
-  if note_filepath and vim.fn.filereadable(note_filepath) == 1 then
-    os.remove(note_filepath)
-    vim.notify('Sidenote: All notes for this buffer have been deleted.')
-    require('sidenote.lsp').update_diagnostics(bufnr)
-  else
-    vim.notify('Sidenote: No notes found for this buffer.', vim.log.levels.INFO)
-  end
+   if note_filepath and vim.fn.filereadable(note_filepath) == 1 then
+     os.remove(note_filepath)
+     vim.notify('Sidenote: All notes for this buffer have been deleted.')
+
+     -- Clear UI display
+     if ui_manager then
+       ui_manager:clear(bufnr)
+     end
+   else
+     vim.notify('Sidenote: No notes found for this buffer.', vim.log.levels.INFO)
+   end
 end
 
 ---

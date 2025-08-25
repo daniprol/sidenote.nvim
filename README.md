@@ -4,19 +4,19 @@
 
 In a compelling video on how to remember everything you read, [Professor Jeffrey Kaplan explains an effective technique](https://www.youtube.com/watch?v=uiNB-6SuqVA): after reading a passage, force yourself to summarize its core idea in a single sentence in the margin. This act of retrieval is what builds long-term memory.
 
-`sidenote.nvim` is a Neovim plugin designed to bring this powerful learning method directly into your text editor. It allows you to attach your thoughts, summaries, and questions to text as non-intrusive "margin notes," which are displayed as native LSP diagnostics.
+`sidenote.nvim` is a Neovim plugin designed to bring this powerful learning method directly into your text editor. It allows you to attach your thoughts, summaries, and questions to text as non-intrusive "margin notes," which are displayed as virtual text or signs.
 
 It's a simple tool for a profound purpose: to help you think more deeply and remember more effectively.
 
 ![sidenote.nvim demo](https://user-images.githubusercontent.com/2336198/263520003-735133b8-5f31-4a23-935a-5459a559ac2d.gif)
-*Demo showing note creation, viewing as diagnostics, and listing all notes with Telescope.*
+*Demo showing note creation, viewing as virtual text, and listing all notes with Telescope.*
 
 ---
 
 ## Features
 
 -   ✍️ **Create Notes**: Attach a thought to any block of text using a simple keymap.
--   👀 **Unobtrusive Display**: Notes appear as familiar, unobtrusive LSP-style diagnostics, not as distracting popups.
+-   👀 **Flexible Display**: Notes appear as virtual text or signs, with customizable positioning and styling.
 -   ✏️ **Full CRUD**: Create, Edit, and Delete notes with simple, intuitive commands.
 -   🧠 **Robust Anchoring**: Notes stay attached to their text, even as you add or remove lines above and below them.
 -   🔭 **Telescope Integration**: Fuzzy-find and jump to any note in your entire project with `:SidenoteList`.
@@ -98,8 +98,26 @@ require('sidenote').setup({
   -- The file extension for individual note files.
   note_file_extension = '.sn',
 
-  -- Diagnostic severity for the notes.
-  -- Can be: 'ERROR', 'WARN', 'INFO', 'HINT'
-  diagnostic_severity = 'INFO',
+  -- UI Display configuration
+  ui = {
+    -- Display method: 'virtual_text', 'signs', or 'both'
+    method = 'virtual_text',
+
+    virtual_text = {
+      -- Position: 'eol', 'right_align', 'overlay', 'inline'
+      position = 'eol',
+      -- Prefix for virtual text
+      prefix = '📝',
+      -- Maximum length of displayed note text
+      max_length = 50,
+    },
+
+    signs = {
+      -- Emoji for sign column
+      emoji = '📝',
+      -- Sign priority
+      priority = 10,
+    }
+  },
 })
 ```
