@@ -2,15 +2,9 @@
 
 local sidenote = require('sidenote')
 local paths = require('sidenote.paths')
+local ui = require('sidenote.ui')
 
 local M = {}
-
--- UI manager for dependency injection
-local ui_manager = nil
-
-function M.set_ui_manager(manager)
-  ui_manager = manager
-end
 
 ---
 -- Gets the visual selection range and text.
@@ -102,10 +96,8 @@ function M.create_note()
      vim.notify('Sidenote: Note saved successfully!')
 
      -- Update UI display
-     if ui_manager then
-       local located_notes = M.find_all_notes_in_buffer(bufnr)
-       ui_manager:update(bufnr, located_notes)
-     end
+     local located_notes = M.find_all_notes_in_buffer(bufnr)
+     ui.update_display(bufnr, located_notes)
   end)
 end
 
@@ -173,10 +165,8 @@ function M.delete_note_at_cursor()
    vim.notify('Sidenote: Note deleted successfully.')
 
    -- Update UI display
-   if ui_manager then
-     local located_notes = M.find_all_notes_in_buffer(bufnr)
-     ui_manager:update(bufnr, located_notes)
-   end
+   local located_notes = M.find_all_notes_in_buffer(bufnr)
+   ui.update_display(bufnr, located_notes)
 end
 
 ---
@@ -235,10 +225,8 @@ function M.edit_note_at_cursor()
      vim.notify('Sidenote: Note updated successfully.')
 
      -- Update UI display
-     if ui_manager then
-       local located_notes = M.find_all_notes_in_buffer(bufnr)
-       ui_manager:update(bufnr, located_notes)
-     end
+     local located_notes = M.find_all_notes_in_buffer(bufnr)
+     ui.update_display(bufnr, located_notes)
   end)
 end
 
@@ -254,9 +242,7 @@ function M.delete_all_notes_for_buffer()
      vim.notify('Sidenote: All notes for this buffer have been deleted.')
 
      -- Clear UI display
-     if ui_manager then
-       ui_manager:clear(bufnr)
-     end
+     ui.clear_display(bufnr)
    else
      vim.notify('Sidenote: No notes found for this buffer.', vim.log.levels.INFO)
    end
