@@ -8,20 +8,43 @@ local M = {}
 
 ---
 -- Gets the visual selection range and text.
--- @return integer, integer, string[]|nil
+-- @return integer, integer, integer, integer, string[]|nil
 local function get_visual_selection()
-  local _, start_row, _, _ = unpack(vim.fn.getpos("'<"))
-  local _, end_row, _, _ = unpack(vim.fn.getpos("'>"))
+  local _, start_row, start_col, _ = unpack(vim.fn.getpos("'<"))
+  local _, end_row, end_col, _ = unpack(vim.fn.getpos("'>"))
   local lines = vim.api.nvim_buf_get_lines(0, start_row - 1, end_row, false)
-  return start_row, end_row, lines
+
+  -- Extract the exact selected text based on columns
+  if #lines == 1 then
+    -- Single line selection
+    local line = lines[1]
+    local selected_text = line:sub(start_col, end_col)
+    return start_row, start_col, end_row, end_col, {selected_text}
+  else
+    -- Multi-line selection
+    local result = {}
+    for i, line in ipairs(lines) do
+      if i == 1 then
+        -- First line: from start_col to end
+        result[i] = line:sub(start_col)
+      elseif i == #lines then
+        -- Last line: from start to end_col
+        result[i] = line:sub(1, end_col)
+      else
+        -- Middle lines: full line
+        result[i] = line
+      end
+    end
+    return start_row, start_col, end_row, end_col, result
+  end
 end
 
 ---
--- Finds the current line number of a note's anchor text in the buffer.
+-- Finds the current position of a note's anchor text in the buffer.
 -- @param bufnr integer The buffer to search in.
 -- @param note table The note object with its anchor text.
--- @return integer|nil The starting line number (1-based) or nil if not found.
-local function find_anchor_start_line(bufnr, note)
+-- @return integer|nil, integer|nil, integer|nil The line number (1-based), start_col (0-based), end_col (0-based) or nil if not found.
+local function find_anchor_position(bufnr, note)
   local buf_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local anchor_lines = note.anchor
   if not anchor_lines then return nil end
@@ -32,16 +55,52 @@ local function find_anchor_start_line(bufnr, note)
     return nil
   end
 
-  for i = 0, num_buf_lines - num_anchor_lines do
-    local match = true
-    for j = 1, num_anchor_lines do
-      if buf_lines[i + j] ~= anchor_lines[j] then
-        match = false
-        break
+  -- For now, handle single-line anchors (most common case)
+  if num_anchor_lines == 1 then
+    local anchor_text = anchor_lines[1]
+    local config = require('sidenote').config
+
+    if config.debug then
+      print(string.format("DEBUG: Looking for anchor text: '%s'", anchor_text))
+    end
+
+    for i = 0, num_buf_lines - 1 do
+      local line = buf_lines[i + 1]
+      local start_col = string.find(line, anchor_text, 1, true)
+
+      if config.debug then
+        print(string.format("DEBUG: Checking line %d: '%s', found at col %s", i + 1, line, tostring(start_col)))
+      end
+
+      if start_col then
+        local end_col = start_col + #anchor_text - 1
+        if config.debug then
+          print(string.format("DEBUG: Found anchor at line %d, cols %d-%d (0-indexed: %d-%d)",
+            i + 1, start_col, end_col, start_col - 1, end_col))
+        end
+        return i + 1, start_col - 1, end_col  -- Convert to 0-based columns
       end
     end
-    if match then
-      return i + 1 -- Return 1-based line number
+
+    if config.debug then
+      print("DEBUG: Anchor text not found in buffer")
+    end
+  else
+    -- For multi-line anchors, find the starting line
+    for i = 0, num_buf_lines - num_anchor_lines do
+      local match = true
+      for j = 1, num_anchor_lines do
+        if buf_lines[i + j] ~= anchor_lines[j] then
+          match = false
+          break
+        end
+      end
+      if match then
+        -- For multi-line, use original column positions if available
+        local start_col = note.original_start_col and (note.original_start_col - 1) or 0
+        local end_col = note.original_end_col and (note.original_end_col - 1) or #buf_lines[i + 1]
+        return i + 1, start_col, end_col
+      end
     end
   end
 
@@ -52,7 +111,7 @@ end
 -- Prompts user for a note and saves it for the current visual selection.
 function M.create_note()
   if not sidenote.config.enabled then return end
-  local start_line, _, anchor_text = get_visual_selection()
+  local start_line, start_col, end_line, end_col, anchor_text = get_visual_selection()
   if not anchor_text or #anchor_text == 0 then
     vim.notify('Sidenote: No visual selection found.', vim.log.levels.WARN)
     return
@@ -82,6 +141,9 @@ function M.create_note()
     local new_note = {
       id = os.date('!%Y-%m-%dT%H:%M:%SZ') .. '-' .. tostring(math.random()),
       original_start_line = start_line,
+      original_start_col = start_col,
+      original_end_line = end_line,
+      original_end_col = end_col,
       text = note_text,
       anchor = anchor_text,
     }
@@ -104,7 +166,7 @@ end
 ---
 -- Finds all notes and their current positions in the buffer.
 -- @param bufnr integer The buffer number.
--- @return table A list of note objects, each with a 'current_line' key.
+-- @return table A list of note objects, each with 'current_line', 'current_start_col', 'current_end_col' keys.
 function M.find_all_notes_in_buffer(bufnr)
   local located_notes = {}
   local all_notes = M.parse_notes_for_buffer(bufnr)
@@ -113,9 +175,11 @@ function M.find_all_notes_in_buffer(bufnr)
   end
 
   for _, note in ipairs(all_notes) do
-    local start_line = find_anchor_start_line(bufnr, note)
-    if start_line then
-      note.current_line = start_line
+    local current_line, current_start_col, current_end_col = find_anchor_position(bufnr, note)
+    if current_line then
+      note.current_line = current_line
+      note.current_start_col = current_start_col
+      note.current_end_col = current_end_col
       table.insert(located_notes, note)
     end
   end

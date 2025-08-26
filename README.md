@@ -17,6 +17,7 @@ It's a simple tool for a profound purpose: to help you think more deeply and rem
 
 -   ✍️ **Create Notes**: Attach a thought to any block of text using a simple keymap.
 -   👀 **Virtual Text Display**: Notes appear as virtual text with customizable positioning and optional sign column indicators.
+-   🎯 **Smart Anchor Highlighting**: The exact text you selected when creating a note is highlighted, with enhanced styling when your cursor hovers over it.
 -   ✏️ **Full CRUD**: Create, Edit, and Delete notes with simple, intuitive commands.
 -   🧠 **Robust Anchoring**: Notes stay attached to their text, even as you add or remove lines above and below them.
 -   🔭 **Telescope Integration**: Fuzzy-find and jump to any note in your entire project with `:SidenoteList`.
@@ -53,6 +54,18 @@ Install with your favorite package manager.
 ## Usage
 
 `sidenote.nvim` is designed to be simple to use out of the box.
+
+### Troubleshooting
+
+If you encounter issues with anchor highlighting (especially at column 0), you can enable debug mode:
+
+```lua
+require('sidenote').setup({
+  debug = true,  -- Enable debug logging
+})
+```
+
+This will print debug information to help identify issues with note positioning and anchor text detection.
 
 | Keymap          | Mode   | Description                                |
 | --------------- | ------ | ------------------------------------------ |
@@ -113,5 +126,17 @@ require('sidenote').setup({
 
   -- Emoji for sign column when signs are enabled
   sign_emoji = '📝',
+
+  -- Anchor text highlighting configuration
+  anchor_highlight = {
+    -- Whether to highlight anchor text
+    enabled = true,
+    -- Default highlight group for anchor text
+    default_hl = 'SidenoteAnchor',
+    -- Highlight group when cursor is over anchor text
+    active_hl = 'SidenoteAnchorActive',
+    -- Priority for anchor highlights (lower than virtual text)
+    priority = 50,
+  },
 })
 ```

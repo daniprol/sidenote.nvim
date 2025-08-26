@@ -88,6 +88,31 @@ local function setup_autocmds(config)
       end, 100)
     end,
   })
+
+  -- Add cursor tracking for anchor highlight updates
+  if config.anchor_highlight.enabled then
+    vim.api.nvim_create_autocmd({ 'CursorMoved', 'CursorMovedI' }, {
+      group = group,
+      pattern = '*',
+      callback = function(args)
+        if not M.config.enabled then
+          return
+        end
+
+        if not vim.tbl_contains(config.filetypes, vim.bo[args.buf].filetype) then
+          return
+        end
+
+        -- Use vim.schedule to defer the update for better performance
+        vim.schedule(function()
+          if vim.api.nvim_buf_is_valid(args.buf) then
+            local cursor = vim.api.nvim_win_get_cursor(0)
+            ui.update_anchor_highlight_styles(args.buf, cursor[1], cursor[2])
+          end
+        end)
+      end,
+    })
+  end
 end
 
 local function setup_commands()

@@ -37,6 +37,21 @@ M.defaults = {
   -- Emoji for sign column when signs are enabled
   sign_emoji = '📝',
 
+  -- Anchor text highlighting configuration
+  anchor_highlight = {
+    -- Whether to highlight anchor text
+    enabled = true,
+    -- Default highlight group for anchor text
+    default_hl = 'SidenoteAnchor',
+    -- Highlight group when cursor is over anchor text
+    active_hl = 'SidenoteAnchorActive',
+    -- Priority for anchor highlights (lower than virtual text)
+    priority = 50,
+  },
+
+  -- Debug mode (set to true to enable debug logging)
+  debug = false,
+
   -- A list of filetypes for which the plugin should be active.
   filetypes = { 'markdown', 'txt' },
 
