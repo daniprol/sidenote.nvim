@@ -7,6 +7,8 @@ local persistence = require('sidenote.persistence')
 
 local M = {}
 
+-- (Helper functions like get_visual_selection and find_anchor_position remain the same)
+
 ---@private
 -- Gets the visual selection range and text.
 ---@return integer, integer, integer, integer, string[]|nil
@@ -35,24 +37,6 @@ local function get_visual_selection()
 end
 
 ---@private
--- Checks if the anchor text matches the buffer content at a given line.
----@param buf_lines table The buffer lines.
----@param anchor_lines table The anchor lines.
----@param start_line_1based integer The 1-based line to start checking from.
----@return boolean
-local function anchor_matches_at(buf_lines, anchor_lines, start_line_1based)
-  if start_line_1based < 1 or start_line_1based + #anchor_lines - 1 > #buf_lines then
-    return false
-  end
-  for i = 1, #anchor_lines do
-    if buf_lines[start_line_1based + i - 1] ~= anchor_lines[i] then
-      return false
-    end
-  end
-  return true
-end
-
----@private
 -- Finds the current position of a note's anchor text in the buffer.
 ---@param bufnr integer The buffer to search in.
 ---@param note table The note object with its anchor text.
@@ -64,15 +48,24 @@ local function find_anchor_position(bufnr, note)
     return nil
   end
 
-  local found_line_1based = nil
+  local function anchor_matches_at(start_line_1based)
+    if start_line_1based < 1 or start_line_1based + #anchor_lines - 1 > #buf_lines then
+      return false
+    end
+    for i = 1, #anchor_lines do
+      if buf_lines[start_line_1based + i - 1] ~= anchor_lines[i] then
+        return false
+      end
+    end
+    return true
+  end
 
-  -- 1. Optimistic check: See if the note is still at its original location.
-  if anchor_matches_at(buf_lines, anchor_lines, note.original_start_line) then
+  local found_line_1based = nil
+  if anchor_matches_at(note.original_start_line) then
     found_line_1based = note.original_start_line
   else
-    -- 2. Fallback: Scan the entire buffer to find the first match.
     for i = 1, #buf_lines - #anchor_lines + 1 do
-      if anchor_matches_at(buf_lines, anchor_lines, i) then
+      if anchor_matches_at(i) then
         found_line_1based = i
         break
       end
@@ -80,17 +73,10 @@ local function find_anchor_position(bufnr, note)
   end
 
   if found_line_1based then
-    local start_line = found_line_1based - 1 -- Convert to 0-indexed
+    local start_line = found_line_1based - 1
     local end_line = start_line + #anchor_lines - 1
     local start_col = (note.original_start_col or 1) - 1
-    local end_col
-
-    if #anchor_lines == 1 then
-      end_col = start_col + #anchor_lines[1]
-    else
-      end_col = #anchor_lines[#anchor_lines]
-    end
-
+    local end_col = (#anchor_lines == 1) and (start_col + #anchor_lines[1]) or #anchor_lines[#anchor_lines]
     return { line = start_line, start_col = start_col, end_line = end_line, end_col = end_col }
   end
 
@@ -98,71 +84,10 @@ local function find_anchor_position(bufnr, note)
 end
 
 ---@public
--- Prompts user for a note and saves it for the current visual selection.
-function M.create_note()
-  if not sidenote.config.enabled then return end
-  local start_line, start_col, end_line, end_col, anchor_text = get_visual_selection()
-  if not anchor_text or #anchor_text == 0 then
-    vim.notify('Sidenote: No visual selection found.', vim.log.levels.WARN)
-    return
-  end
-
-  local bufnr = vim.api.nvim_get_current_buf()
-  local existing_notes = M.find_all_notes_in_buffer(bufnr)
-  for _, note in ipairs(existing_notes) do
-    local existing_start = note.pos.line + 1
-    local existing_end = note.pos.end_line + 1
-    if start_line <= existing_end and existing_start <= end_line then
-      vim.notify('Sidenote: Cannot create a note that overlaps with an existing one.', vim.log.levels.ERROR)
-      return
-    end
-  end
-
-  vim.ui.input({ prompt = 'Sidenote: ' }, function(note_text)
-    if not note_text or note_text == '' then
-      vim.notify('Sidenote: Note creation cancelled.', vim.log.levels.INFO)
-      return
-    end
-
-    if string.len(note_text) > sidenote.config.max_char_count then
-      vim.notify(string.format('Sidenote: Note exceeds max length of %d', sidenote.config.max_char_count), vim.log.levels.WARN)
-      return
-    end
-
-    local note_filepath = paths.get_note_filepath(bufnr)
-    if not note_filepath then
-      vim.notify('Sidenote: Could not determine note file path.', vim.log.levels.ERROR)
-      return
-    end
-
-    local new_note = {
-      id = os.date('!%Y-%m-%dT%H:%M:%SZ') .. '-' .. tostring(math.random()),
-      original_start_line = start_line,
-      original_start_col = start_col,
-      original_end_line = end_line,
-      original_end_col = end_col,
-      text = note_text,
-      anchor = anchor_text,
-    }
-
-    local all_notes = M.parse_notes_for_buffer(bufnr) or {}
-    table.insert(all_notes, new_note)
-
-    persistence.save(all_notes, note_filepath)
-    vim.notify('Sidenote: Note saved successfully!')
-
-    local located_notes = M.find_all_notes_in_buffer(bufnr)
-    ui.update_display(bufnr, located_notes)
-  end)
-end
-
----@public
 -- Finds all notes and their current positions in the buffer.
----@param bufnr integer The buffer number.
----@return table A list of note objects, each with a 'pos' table.
 function M.find_all_notes_in_buffer(bufnr)
   local located_notes = {}
-  local all_notes = M.parse_notes_for_buffer(bufnr)
+  local all_notes = M.get_notes_for_buffer(bufnr)
   if not all_notes then
     return located_notes
   end
@@ -179,22 +104,98 @@ function M.find_all_notes_in_buffer(bufnr)
 end
 
 ---@public
--- Deletes the note found at the current cursor position.
+-- Gets the notes for the current buffer from the project database.
+function M.get_notes_for_buffer(bufnr)
+  local persistence_path = paths.get_persistence_filepath(bufnr)
+  if not persistence_path then return {} end
+
+  local project_notes = persistence.load(persistence_path)
+  if not project_notes then return {} end
+
+  local current_file = vim.api.nvim_buf_get_name(bufnr)
+  return project_notes[current_file] or {}
+end
+
+---@private
+-- A generic function to perform note modifications.
+---@param bufnr integer
+---@param modification_fcn function A function that takes a list of notes and returns a modified list.
+local function perform_modification(bufnr, modification_fcn)
+  local persistence_path = paths.get_persistence_filepath(bufnr)
+  if not persistence_path then return end
+
+  local project_notes = persistence.load(persistence_path) or {}
+  local current_file = vim.api.nvim_buf_get_name(bufnr)
+  local current_notes = project_notes[current_file] or {}
+
+  local modified_notes, success = modification_fcn(current_notes)
+
+  if success then
+    if not modified_notes or #modified_notes == 0 then
+      project_notes[current_file] = nil
+    else
+      project_notes[current_file] = modified_notes
+    end
+    persistence.save(project_notes, persistence_path)
+
+    local located_notes = M.find_all_notes_in_buffer(bufnr)
+    ui.update_display(bufnr, located_notes)
+  end
+end
+
+---@public
+function M.create_note()
+  if not sidenote.config.enabled then return end
+  local start_line, start_col, end_line, end_col, anchor_text = get_visual_selection()
+  if not anchor_text or #anchor_text == 0 then
+    vim.notify('Sidenote: No visual selection found.', vim.log.levels.WARN)
+    return
+  end
+
+  local bufnr = vim.api.nvim_get_current_buf()
+  local existing_notes = M.find_all_notes_in_buffer(bufnr)
+  for _, note in ipairs(existing_notes) do
+    if start_line <= (note.pos.end_line + 1) and (note.pos.line + 1) <= end_line then
+      vim.notify('Sidenote: Cannot create a note that overlaps with an existing one.', vim.log.levels.ERROR)
+      return
+    end
+  end
+
+  vim.ui.input({ prompt = 'Sidenote: ' }, function(note_text)
+    if not note_text or note_text == '' then
+      vim.notify('Sidenote: Note creation cancelled.', vim.log.levels.INFO)
+      return
+    end
+
+    perform_modification(bufnr, function(notes)
+      local new_note = {
+        id = os.date('!%Y-%m-%dT%H:%M:%SZ') .. '-' .. tostring(math.random()),
+        original_start_line = start_line,
+        original_start_col = start_col,
+        original_end_line = end_line,
+        original_end_col = end_col,
+        text = note_text,
+        anchor = anchor_text,
+      }
+      table.insert(notes, new_note)
+      vim.notify('Sidenote: Note saved successfully!')
+      return notes, true
+    end)
+  end)
+end
+
+---@public
 function M.delete_note_at_cursor()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
 
   local located_notes = M.find_all_notes_in_buffer(bufnr)
-  if #located_notes == 0 then
-    return
-  end
+  if #located_notes == 0 then return end
 
   local note_to_delete_id = nil
   for _, note in ipairs(located_notes) do
-    local note_start_line = note.pos.line + 1
-    local note_end_line = note.pos.end_line + 1
-    if cursor_line >= note_start_line and cursor_line <= note_end_line then
+    if cursor_line >= (note.pos.line + 1) and cursor_line <= (note.pos.end_line + 1) then
       note_to_delete_id = note.id
       break
     end
@@ -205,40 +206,30 @@ function M.delete_note_at_cursor()
     return
   end
 
-  local all_notes_raw = M.parse_notes_for_buffer(bufnr)
-  local updated_notes = {}
-  for _, note in ipairs(all_notes_raw) do
-    if note.id ~= note_to_delete_id then
-      table.insert(updated_notes, note)
+  perform_modification(bufnr, function(notes)
+    local updated_notes = {}
+    for _, note in ipairs(notes) do
+      if note.id ~= note_to_delete_id then
+        table.insert(updated_notes, note)
+      end
     end
-  end
-
-  local note_filepath = paths.get_note_filepath(bufnr)
-  persistence.save(updated_notes, note_filepath)
-
-  vim.notify('Sidenote: Note deleted successfully.')
-
-  local new_located_notes = M.find_all_notes_in_buffer(bufnr)
-  ui.update_display(bufnr, new_located_notes)
+    vim.notify('Sidenote: Note deleted successfully.')
+    return updated_notes, true
+  end)
 end
 
 ---@public
--- Finds and prompts to update a note at the current cursor position.
 function M.edit_note_at_cursor()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
   local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
 
   local located_notes = M.find_all_notes_in_buffer(bufnr)
-  if #located_notes == 0 then
-    return
-  end
+  if #located_notes == 0 then return end
 
   local note_to_edit = nil
   for _, note in ipairs(located_notes) do
-    local note_start_line = note.pos.line + 1
-    local note_end_line = note.pos.end_line + 1
-    if cursor_line >= note_start_line and cursor_line <= note_end_line then
+    if cursor_line >= (note.pos.line + 1) and cursor_line <= (note.pos.end_line + 1) then
       note_to_edit = note
       break
     end
@@ -255,60 +246,27 @@ function M.edit_note_at_cursor()
       return
     end
 
-    if string.len(new_text) > sidenote.config.max_char_count then
-      vim.notify(string.format('Sidenote: Note exceeds max length of %d', sidenote.config.max_char_count), vim.log.levels.WARN)
-      return
-    end
-
-    local all_notes_raw = M.parse_notes_for_buffer(bufnr)
-    for i, note in ipairs(all_notes_raw) do
-      if note.id == note_to_edit.id then
-        all_notes_raw[i].text = new_text
-        break
+    perform_modification(bufnr, function(notes)
+      for i, note in ipairs(notes) do
+        if note.id == note_to_edit.id then
+          notes[i].text = new_text
+          break
+        end
       end
-    end
-
-    local note_filepath = paths.get_note_filepath(bufnr)
-    persistence.save(all_notes_raw, note_filepath)
-
-    vim.notify('Sidenote: Note updated successfully.')
-
-    local located_notes = M.find_all_notes_in_buffer(bufnr)
-    ui.update_display(bufnr, located_notes)
+      vim.notify('Sidenote: Note updated successfully.')
+      return notes, true
+    end)
   end)
 end
 
 ---@public
--- Deletes all notes for the current buffer.
 function M.delete_all_notes_for_buffer()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
-  local note_filepath = paths.get_note_filepath(bufnr)
-
-  if note_filepath and vim.fn.filereadable(note_filepath) == 1 then
-    os.remove(note_filepath)
+  perform_modification(bufnr, function(_)
     vim.notify('Sidenote: All notes for this buffer have been deleted.')
-    ui.clear_display(bufnr)
-  else
-    vim.notify('Sidenote: No notes found for this buffer.', vim.log.levels.INFO)
-  end
-end
-
----@public
--- Parses the note file for a given buffer.
----@param bufnr integer The buffer number.
----@return table|nil The parsed notes table or nil.
-function M.parse_notes_for_buffer(bufnr)
-  local note_filepath = paths.get_note_filepath(bufnr)
-  return M.parse_notes_from_file(note_filepath)
-end
-
----@public
--- Parses a note file from a given filepath.
----@param filepath string The path to the note file.
----@return table|nil The parsed notes table or nil.
-function M.parse_notes_from_file(filepath)
-  return persistence.load(filepath)
+    return {}, true -- Return an empty table to delete all notes for this file
+  end)
 end
 
 return M

@@ -14,12 +14,8 @@ M.defaults = {
     list_notes = '<leader>sl',
   },
 
-  -- The name of the directory where all notes are stored.
-  notes_dir_name = '.sidenotes',
-
-  -- The file extension for individual note files.
-  -- e.g., 'main.lua' -> 'main.lua.sn'
-  note_file_extension = '.sn',
+  -- The name of the single file where all notes for a project are stored.
+  persistence_file = '.sidenotes.json',
 
   -- Virtual text configuration
   virtual_text = {
