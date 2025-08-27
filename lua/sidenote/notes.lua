@@ -7,40 +7,12 @@ local persistence = require('sidenote.persistence')
 
 local M = {}
 
--- (Helper functions like get_visual_selection and find_anchor_position remain the same)
+--#region Private Helper Functions
 
----@private
--- Gets the visual selection range and text.
----@return integer, integer, integer, integer, string[]|nil
-local function get_visual_selection()
-  local _, start_row, start_col, _ = unpack(vim.fn.getpos("'<"))
-  local _, end_row, end_col, _ = unpack(vim.fn.getpos("'>"))
-  local lines = vim.api.nvim_buf_get_lines(0, start_row - 1, end_row, false)
-
-  if #lines == 1 then
-    local line = lines[1]
-    local selected_text = line:sub(start_col, end_col)
-    return start_row, start_col, end_row, end_col, { selected_text }
-  else
-    local result = {}
-    for i, line in ipairs(lines) do
-      if i == 1 then
-        result[i] = line:sub(start_col)
-      elseif i == #lines then
-        result[i] = line:sub(1, end_col)
-      else
-        result[i] = line
-      end
-    end
-    return start_row, start_col, end_row, end_col, result
-  end
-end
-
----@private
--- Finds the current position of a note's anchor text in the buffer.
----@param bufnr integer The buffer to search in.
----@param note table The note object with its anchor text.
----@return table|nil A table with {line, start_col, end_line, end_col} (0-indexed) or nil.
+--- Finds the current position of a note's anchor text in the buffer.
+-- @param bufnr (integer) The buffer to search in.
+-- @param note (table) The note object, containing the anchor text and original position.
+-- @return (table|nil) A position table { line, start_col, end_line, end_col } (0-indexed) or nil.
 local function find_anchor_position(bufnr, note)
   local buf_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
   local anchor_lines = note.anchor
@@ -49,7 +21,7 @@ local function find_anchor_position(bufnr, note)
   end
 
   local function anchor_matches_at(start_line_1based)
-    if start_line_1based < 1 or start_line_1based + #anchor_lines - 1 > #buf_lines then
+    if start_line_1based < 1 or (start_line_1based + #anchor_lines - 1) > #buf_lines then
       return false
     end
     for i = 1, #anchor_lines do
@@ -72,54 +44,46 @@ local function find_anchor_position(bufnr, note)
     end
   end
 
-  if found_line_1based then
-    local start_line = found_line_1based - 1
-    local end_line = start_line + #anchor_lines - 1
-    local start_col = (note.original_start_col or 1) - 1
-    local end_col = (#anchor_lines == 1) and (start_col + #anchor_lines[1]) or #anchor_lines[#anchor_lines]
-    return { line = start_line, start_col = start_col, end_line = end_line, end_col = end_col }
+  if not found_line_1based then
+    return nil
   end
 
-  return nil
+  local pos = {}
+  pos.line = found_line_1based - 1 -- API needs 0-indexed line
+  pos.end_line = pos.line + #anchor_lines - 1
+  pos.start_col = (note.original_start_col or 1) - 1 -- API needs 0-indexed column
+
+  if #anchor_lines == 1 then
+    pos.end_col = pos.start_col + #anchor_lines[1]
+  else
+    pos.end_col = #anchor_lines[#anchor_lines]
+  end
+
+  return pos
 end
 
----@public
--- Finds all notes and their current positions in the buffer.
-function M.find_all_notes_in_buffer(bufnr)
-  local located_notes = {}
-  local all_notes = M.get_notes_for_buffer(bufnr)
-  if not all_notes then
-    return located_notes
-  end
+--- Checks if a new selection range overlaps with any existing notes.
+-- @param located_notes (table) A list of notes that have a 'pos' table.
+-- @param new_start_line (integer) The 1-based starting line of the new selection.
+-- @param new_end_line (integer) The 1-based ending line of the new selection.
+-- @return (boolean) True if an overlap is found, false otherwise.
+local function check_for_overlap(located_notes, new_start_line, new_end_line)
+  for _, note in ipairs(located_notes) do
+    -- note.pos contains 0-indexed lines. Convert to 1-based for comparison.
+    local existing_start = note.pos.line + 1
+    local existing_end = note.pos.end_line + 1
 
-  for _, note in ipairs(all_notes) do
-    local pos = find_anchor_position(bufnr, note)
-    if pos then
-      note.pos = pos
-      table.insert(located_notes, note)
+    -- Standard range overlap check: (StartA <= EndB) and (StartB <= EndA)
+    if new_start_line <= existing_end and existing_start <= new_end_line then
+      return true -- Overlap found
     end
   end
-
-  return located_notes
+  return false -- No overlap
 end
 
----@public
--- Gets the notes for the current buffer from the project database.
-function M.get_notes_for_buffer(bufnr)
-  local persistence_path = paths.get_persistence_filepath(bufnr)
-  if not persistence_path then return {} end
-
-  local project_notes = persistence.load(persistence_path)
-  if not project_notes then return {} end
-
-  local current_file = vim.api.nvim_buf_get_name(bufnr)
-  return project_notes[current_file] or {}
-end
-
----@private
--- A generic function to perform note modifications.
----@param bufnr integer
----@param modification_fcn function A function that takes a list of notes and returns a modified list.
+--- A generic function to perform note modifications.
+-- @param bufnr (integer)
+-- @param modification_fcn (function) A function that takes a list of notes and returns a modified list.
 local function perform_modification(bufnr, modification_fcn)
   local persistence_path = paths.get_persistence_filepath(bufnr)
   if not persistence_path then return end
@@ -143,10 +107,51 @@ local function perform_modification(bufnr, modification_fcn)
   end
 end
 
----@public
+--#endregion
+
+--#region Public API Functions
+
+--- Gets all notes for a buffer and finds their current position.
+function M.find_all_notes_in_buffer(bufnr)
+  local located_notes = {}
+  local persistence_path = paths.get_persistence_filepath(bufnr)
+  if not persistence_path then return {} end
+
+  local project_notes = persistence.load(persistence_path) or {}
+  local current_file = vim.api.nvim_buf_get_name(bufnr)
+  local notes_for_file = project_notes[current_file] or {}
+
+  for _, note in ipairs(notes_for_file) do
+    local pos = find_anchor_position(bufnr, note)
+    if pos then
+      note.pos = pos
+      table.insert(located_notes, note)
+    end
+  end
+  return located_notes
+end
+
+--- Prompts user for a note and saves it for the current visual selection.
 function M.create_note()
   if not sidenote.config.enabled then return end
-  local start_line, start_col, end_line, end_col, anchor_text = get_visual_selection()
+
+  -- getpos() returns 1-based coordinates.
+  local _, start_line, start_col, _ = unpack(vim.fn.getpos("'<"))
+  local _, end_line, end_col, _ = unpack(vim.fn.getpos("'>"))
+  local buffer_lines = vim.api.nvim_buf_get_lines(0, start_line - 1, end_line, false)
+
+  local anchor_text
+  if #buffer_lines == 1 then
+    anchor_text = { buffer_lines[1]:sub(start_col, end_col) }
+  else
+    anchor_text = {}
+    for i, line in ipairs(buffer_lines) do
+      if i == 1 then table.insert(anchor_text, line:sub(start_col)) end
+      if i > 1 and i < #buffer_lines then table.insert(anchor_text, line) end
+      if i == #buffer_lines and i > 1 then table.insert(anchor_text, line:sub(1, end_col)) end
+    end
+  end
+
   if not anchor_text or #anchor_text == 0 then
     vim.notify('Sidenote: No visual selection found.', vim.log.levels.WARN)
     return
@@ -154,11 +159,11 @@ function M.create_note()
 
   local bufnr = vim.api.nvim_get_current_buf()
   local existing_notes = M.find_all_notes_in_buffer(bufnr)
-  for _, note in ipairs(existing_notes) do
-    if start_line <= (note.pos.end_line + 1) and (note.pos.line + 1) <= end_line then
-      vim.notify('Sidenote: Cannot create a note that overlaps with an existing one.', vim.log.levels.ERROR)
-      return
-    end
+
+  -- Use the clean helper function to check for overlaps.
+  if check_for_overlap(existing_notes, start_line, end_line) then
+    vim.notify('Sidenote: Cannot create a note that overlaps with an existing one.', vim.log.levels.ERROR)
+    return
   end
 
   vim.ui.input({ prompt = 'Sidenote: ' }, function(note_text)
@@ -184,11 +189,11 @@ function M.create_note()
   end)
 end
 
----@public
+--- Deletes the note found at the current cursor position.
 function M.delete_note_at_cursor()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] -- This is 1-based
 
   local located_notes = M.find_all_notes_in_buffer(bufnr)
   if #located_notes == 0 then return end
@@ -218,11 +223,11 @@ function M.delete_note_at_cursor()
   end)
 end
 
----@public
+--- Finds and prompts to update a note at the current cursor position.
 function M.edit_note_at_cursor()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
-  local cursor_line = vim.api.nvim_win_get_cursor(0)[1]
+  local cursor_line = vim.api.nvim_win_get_cursor(0)[1] -- This is 1-based
 
   local located_notes = M.find_all_notes_in_buffer(bufnr)
   if #located_notes == 0 then return end
@@ -259,7 +264,7 @@ function M.edit_note_at_cursor()
   end)
 end
 
----@public
+--- Deletes all notes for the current buffer.
 function M.delete_all_notes_for_buffer()
   if not sidenote.config.enabled then return end
   local bufnr = vim.api.nvim_get_current_buf()
@@ -268,5 +273,7 @@ function M.delete_all_notes_for_buffer()
     return {}, true -- Return an empty table to delete all notes for this file
   end)
 end
+
+--#endregion
 
 return M
