@@ -170,3 +170,4 @@ function M.list_notes()
 end
 
 return M
+

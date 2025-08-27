@@ -12,7 +12,8 @@ function M.setup()
   virtual_text_namespace = vim.api.nvim_create_namespace('sidenote_virtual_text')
   anchor_namespace = vim.api.nvim_create_namespace('sidenote_anchors')
 
-  vim.api.nvim_set_hl(0, 'SidenoteVirtualText', { fg = vim.api.nvim_get_hl_by_name('Comment', true).foreground, italic = true })
+  vim.api.nvim_set_hl(0, 'SidenoteVirtualText',
+    { fg = vim.api.nvim_get_hl_by_name('Comment', true).foreground, italic = true })
 
   if config.anchor_highlight.enabled then
     vim.api.nvim_set_hl(0, config.anchor_highlight.default_hl, { link = 'ColorColumn', default = true })
@@ -100,7 +101,7 @@ function M.update_anchor_highlight_styles(bufnr, cursor_line, cursor_col)
         hl_group = config.anchor_highlight.active_hl,
         priority = config.anchor_highlight.priority + 1, -- Higher priority for hover
       })
-      break -- Highlight only the first note found at the cursor
+      break                                              -- Highlight only the first note found at the cursor
     end
   end
 end

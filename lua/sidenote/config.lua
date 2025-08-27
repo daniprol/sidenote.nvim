@@ -8,8 +8,8 @@ M.defaults = {
 
   -- Keymap for creating a note from a visual selection.
   keymap = {
-    create_note = '<leader>s',
-    delete_note = '<leader>sx',
+    create_note = '<leader>sa',
+    delete_note = '<leader>sd',
     edit_note = '<leader>se',
     list_notes = '<leader>sl',
   },

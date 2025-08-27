@@ -35,8 +35,25 @@ local function get_visual_selection()
 end
 
 ---@private
+-- Checks if the anchor text matches the buffer content at a given line.
+---@param buf_lines table The buffer lines.
+---@param anchor_lines table The anchor lines.
+---@param start_line_1based integer The 1-based line to start checking from.
+---@return boolean
+local function anchor_matches_at(buf_lines, anchor_lines, start_line_1based)
+  if start_line_1based < 1 or start_line_1based + #anchor_lines - 1 > #buf_lines then
+    return false
+  end
+  for i = 1, #anchor_lines do
+    if buf_lines[start_line_1based + i - 1] ~= anchor_lines[i] then
+      return false
+    end
+  end
+  return true
+end
+
+---@private
 -- Finds the current position of a note's anchor text in the buffer.
--- Returns coordinates in the format required by nvim_buf_set_extmark.
 ---@param bufnr integer The buffer to search in.
 ---@param note table The note object with its anchor text.
 ---@return table|nil A table with {line, start_col, end_line, end_col} (0-indexed) or nil.
@@ -47,31 +64,34 @@ local function find_anchor_position(bufnr, note)
     return nil
   end
 
-  for line_idx = 0, #buf_lines - #anchor_lines do
-    local is_block_match = true
-    for anchor_idx = 1, #anchor_lines do
-      if buf_lines[line_idx + anchor_idx] ~= anchor_lines[anchor_idx] then
-        is_block_match = false
+  local found_line_1based = nil
+
+  -- 1. Optimistic check: See if the note is still at its original location.
+  if anchor_matches_at(buf_lines, anchor_lines, note.original_start_line) then
+    found_line_1based = note.original_start_line
+  else
+    -- 2. Fallback: Scan the entire buffer to find the first match.
+    for i = 1, #buf_lines - #anchor_lines + 1 do
+      if anchor_matches_at(buf_lines, anchor_lines, i) then
+        found_line_1based = i
         break
       end
     end
+  end
 
-    if is_block_match then
-      local start_line = line_idx
-      local end_line = line_idx + #anchor_lines - 1
-      local start_col = (note.original_start_col or 1) - 1
-      local end_col
+  if found_line_1based then
+    local start_line = found_line_1based - 1 -- Convert to 0-indexed
+    local end_line = start_line + #anchor_lines - 1
+    local start_col = (note.original_start_col or 1) - 1
+    local end_col
 
-      if #anchor_lines == 1 then
-        -- For single-line notes, end_col is relative to its start
-        end_col = start_col + #anchor_lines[1]
-      else
-        -- For multi-line notes, end_col is the byte length of the last line of the anchor
-        end_col = #anchor_lines[#anchor_lines]
-      end
-
-      return { line = start_line, start_col = start_col, end_line = end_line, end_col = end_col }
+    if #anchor_lines == 1 then
+      end_col = start_col + #anchor_lines[1]
+    else
+      end_col = #anchor_lines[#anchor_lines]
     end
+
+    return { line = start_line, start_col = start_col, end_line = end_line, end_col = end_col }
   end
 
   return nil
